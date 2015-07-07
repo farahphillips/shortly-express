@@ -2,16 +2,15 @@ var express = require('express');
 var util = require('./lib/utility');
 var partials = require('express-partials');
 var bodyParser = require('body-parser');
-
-
 var db = require('./app/config');
 var Users = require('./app/collections/users');
 var User = require('./app/models/user');
 var Links = require('./app/collections/links');
 var Link = require('./app/models/link');
 var Click = require('./app/models/click');
-
+var bcrypt = require('bcrypt-nodejs');
 var app = express();
+var loggedInUsers = {}
 
 app.set('views', __dirname + '/views');
 app.set('view engine', 'ejs');
@@ -22,19 +21,27 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static(__dirname + '/public'));
 
-
 app.get('/',
 function(req, res) {
-  res.render('index');
+  if(loggedInUsers[req.sessionID] !== 1) {
+      res.redirect(301, '/login');
+  }
+  res.render('index')
 });
 
 app.get('/create',
 function(req, res) {
+  if(loggedInUsers[req.sessionID] !== 1) {
+      res.redirect(301, '/login');
+  }
   res.render('index');
 });
 
 app.get('/links',
 function(req, res) {
+  if(loggedInUsers[req.sessionID] !== 1) {
+      res.redirect(301, '/login');
+  }
   Links.reset().fetch().then(function(links) {
     res.send(200, links.models);
   });
@@ -42,6 +49,10 @@ function(req, res) {
 
 app.post('/links',
 function(req, res) {
+  if(loggedInUsers[req.sessionID] !== 1) {
+      res.redirect(301, '/login');
+  }
+
   var uri = req.body.url;
 
   if (!util.isValidUrl(uri)) {
@@ -77,19 +88,43 @@ function(req, res) {
 /************************************************************/
 // Write your authentication routes here
 /************************************************************/
+app.get("/logout", function(req, res){
+  if(loggedInUsers[req.sessionID] === 1) {
+    delete loggedInUsers[req.sessionID]
+    console.log("Redirecting to login page.")
+  }
+  res.redirect(301, '/');
+});
 
 app.get("/login", function(req, res){
   res.render("login");
-})
+});
 
 app.post("/login", function(req, res){
-  // check if user & pw exist in the database (check hashes)
-  // return a sessionID or an error
+  var userName = req.body.username
+  var pass = req.body.password
+
+  db.knex('users')
+    .select('password')
+    .where('username', userName)
+    .then(function(password){
+      bcrypt.compare(pass, password[0].password, function(err, response){
+        if(response) {
+          console.log("Password matches.")
+          loggedInUsers[req.sessionID] = 1
+          console.log("Redirecting to front page.")
+          res.redirect(301, '/')
+        } else {
+          console.log("Password does not match.")
+          res.redirect(301, '/login')
+        }
+      })
+    })
 })
 
 app.get("/signup", function(req, res){
   res.render("signup")
-})
+});
 
 app.post("/signup", function(req, res){
   var userName = req.body.username
@@ -101,7 +136,7 @@ app.post("/signup", function(req, res){
     Users.add(newUser)
     res.send(201, "Signup was successful!")
   })
-})
+});
 /************************************************************/
 // Handle the wildcard route last - if all other routes fail
 // assume the route is a short code and try and handle it here.
